@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="com.magames.tecladoia.settings.SettingsActivity"
+    android:supportsSwitchingToNextInputMethod="true">
+    <subtype
+        android:label="@string/subtype_ptbr"
+        android:imeSubtypeLocale="pt_BR"
+        android:imeSubtypeMode="keyboard"
+        android:languageTag="pt-BR" />
+</input-method>
