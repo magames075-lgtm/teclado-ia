@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+env:
+  VERSION: 0.2.0
+  VOSK_MODEL: vosk-model-small-pt-0.3
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,34 +25,59 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK
+      - name: Cache Vosk model
+        id: vosk-cache
+        uses: actions/cache@v4
+        with:
+          path: vosk-cache
+          key: ${{ env.VOSK_MODEL }}-zip-v1
+
+      - name: Download Vosk pt model (bundled in the completo APK)
+        if: steps.vosk-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p vosk-cache
+          curl -fL --retry 5 --retry-delay 5 -o vosk-cache/${VOSK_MODEL}.zip \
+            https://alphacephei.com/vosk/models/${VOSK_MODEL}.zip
+
+      - name: Put model into assets
+        run: |
+          unzip -tq vosk-cache/${VOSK_MODEL}.zip
+          cp vosk-cache/${VOSK_MODEL}.zip app/src/main/assets/${VOSK_MODEL}.zip
+          ls -la app/src/main/assets
+
+      - name: Build APK (completo)
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace --no-daemon
 
-      - name: Rename APK
+      - name: Check model is inside the APK
         run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          unzip -l "$APK" | grep "assets/${VOSK_MODEL}.zip"
           mkdir -p out
-          cp app/build/outputs/apk/debug/app-debug.apk out/teclado-ia-v0.1.0-debug.apk
+          cp "$APK" out/teclado-ia-v${VERSION}-completo.apk
           ls -la out
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: teclado-ia-debug-apk
-          path: out/teclado-ia-v0.1.0-debug.apk
+          name: teclado-ia-completo-apk
+          path: out/teclado-ia-v${{ env.VERSION }}-completo.apk
 
-      - name: Publish GitHub Release v0.1.0
+      - name: Publish GitHub Release v${{ env.VERSION }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.0
-          name: Teclado IA v0.1.0 (MVP)
+          tag_name: v${{ env.VERSION }}
+          name: Teclado IA v${{ env.VERSION }} (completo)
           target_commitish: ${{ github.sha }}
           make_latest: true
           body: |
-            Teclado IA v0.1.0 — MVP gratuito.
-            - Ditado por voz em tempo real (online: reconhecimento do Android; offline: Vosk)
-            - Correção de palavras em português (offline: SymSpell + dicionário 50k; online: LanguageTool)
-            APK de depuração (debug). Instale permitindo "fontes desconhecidas".
-          files: out/teclado-ia-v0.1.0-debug.apk
+            Teclado IA v${{ env.VERSION }} — versão completa, gratuita.
+            - O modelo de voz offline em português (Vosk vosk-model-small-pt-0.3) já vem dentro do APK: instale uma vez e a voz funciona sem internet, sem baixar nada.
+            - Na primeira abertura o modelo é instalado automaticamente (o progresso aparece nas configurações).
+            - Ditado por voz em tempo real (online: reconhecimento do Android; offline: Vosk) e correção em português (SymSpell + LanguageTool).
+            - Assinado com uma chave fixa: as próximas versões instalam por cima desta.
+            Observação: se você tem a v0.1.0 instalada, desinstale-a uma vez antes (ela foi assinada com outra chave).
+            APK de depuração (debug), só para celulares ARM. Instale permitindo "fontes desconhecidas".
+          files: out/teclado-ia-v${{ env.VERSION }}-completo.apk
           fail_on_unmatched_files: true

@@ -7,3 +7,5 @@ local.properties
 .DS_Store
 captures/
 .kotlin/
+# Vosk model zip is downloaded by CI into assets, never committed
+app/src/main/assets/vosk-model-*.zip

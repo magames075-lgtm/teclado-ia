@@ -79,7 +79,11 @@ class SettingsActivity : Activity() {
 
         // 3. Offline model
         col.addView(header("3. Voz offline (sem internet)"))
-        col.addView(text("Baixe uma vez o modelo de voz em português (cerca de 31 MB, gratuito, Vosk). Ele fica guardado no celular e não aumenta o app.", 14f))
+        col.addView(text(
+            if (VoskModelManager.hasBundled(this))
+                "Esta versão completa já traz o modelo de voz em português (Vosk). Ele é instalado automaticamente na primeira abertura, sem baixar nada."
+            else
+                "Baixe uma vez o modelo de voz em português (cerca de 31 MB, gratuito, Vosk). Ele fica guardado no celular e não aumenta o app.", 14f))
         modelStatus = text("", 14f)
         col.addView(modelStatus)
         modelProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -128,6 +132,7 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         VoskModelManager.addListener(modelListener)
+        VoskModelManager.ensureInstalledFromAssets(this)
         renderModel(VoskModelManager.state(this))
         renderSetup()
     }
@@ -164,17 +169,19 @@ class SettingsActivity : Activity() {
     private fun onModelButton() {
         when (VoskModelManager.state(this)) {
             is VoskModelManager.State.Downloading -> VoskModelManager.cancel()
-            is VoskModelManager.State.Unpacking -> {}
-            else -> VoskModelManager.download(this)
+            is VoskModelManager.State.Unpacking, is VoskModelManager.State.Extracting -> {}
+            else -> if (!VoskModelManager.ensureInstalledFromAssets(this)) VoskModelManager.download(this)
         }
     }
 
     private fun renderModel(s: VoskModelManager.State) {
         when (s) {
             is VoskModelManager.State.NotInstalled -> {
-                modelStatus.text = "❌ Modelo offline não baixado."
+                val bundled = VoskModelManager.hasBundled(this)
+                modelStatus.text = if (bundled) "Modelo offline embutido ainda não instalado." else "❌ Modelo offline não baixado."
                 modelProgress.visibility = View.GONE
-                modelButton.text = "Baixar modelo offline (~31 MB)"
+                modelButton.text = if (bundled) "Instalar modelo embutido" else "Baixar modelo offline (~31 MB)"
+                modelButton.visibility = View.VISIBLE
                 modelButton.isEnabled = true
                 modelDelete.visibility = View.GONE
             }
@@ -186,6 +193,7 @@ class SettingsActivity : Activity() {
                 modelProgress.isIndeterminate = s.total <= 0
                 modelProgress.progress = s.percent
                 modelButton.text = "Cancelar"
+                modelButton.visibility = View.VISIBLE
                 modelButton.isEnabled = true
                 modelDelete.visibility = View.GONE
             }
@@ -195,10 +203,21 @@ class SettingsActivity : Activity() {
                 modelProgress.isIndeterminate = true
                 modelButton.isEnabled = false
             }
+            is VoskModelManager.State.Extracting -> {
+                modelStatus.text = "Instalando modelo de voz embutido… ${s.percent}%"
+                modelProgress.visibility = View.VISIBLE
+                modelProgress.isIndeterminate = false
+                modelProgress.progress = s.percent
+                modelButton.text = "Instalando…"
+                modelButton.isEnabled = false
+                modelDelete.visibility = View.GONE
+            }
             is VoskModelManager.State.Installed -> {
                 modelStatus.text = "✅ Modelo offline instalado. A voz funciona sem internet."
                 modelProgress.visibility = View.GONE
+                val bundled = VoskModelManager.hasBundled(this)
                 modelButton.text = "Baixar de novo"
+                modelButton.visibility = if (bundled) View.GONE else View.VISIBLE
                 modelButton.isEnabled = true
                 modelDelete.visibility = View.VISIBLE
             }
@@ -206,6 +225,7 @@ class SettingsActivity : Activity() {
                 modelStatus.text = "⚠️ Falhou: ${s.message}. Verifique a internet e tente de novo."
                 modelProgress.visibility = View.GONE
                 modelButton.text = "Tentar de novo"
+                modelButton.visibility = View.VISIBLE
                 modelButton.isEnabled = true
                 modelDelete.visibility = View.GONE
             }

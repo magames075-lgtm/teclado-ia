@@ -11,8 +11,8 @@ android {
         applicationId = "com.magames.tecladoia"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
         ndk {
             // Real phones only (keeps the APK smaller); Vosk ships native libs per ABI.
@@ -20,9 +20,22 @@ android {
         }
     }
 
+    signingConfigs {
+        // Stable debug key committed to the repo (free personal project) so every CI build
+        // is signed the same way and updates install over the previous version.
+        getByName("debug") {
+            storeFile = file("teclado-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+            storeType = "pkcs12"
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
         release {
             isMinifyEnabled = false
@@ -39,7 +52,7 @@ android {
 
     androidResources {
         // Do not compress the dictionary so it streams fast
-        noCompress += "txt"
+        noCompress += listOf("txt", "zip")
     }
 
     lint {
@@ -49,7 +62,8 @@ android {
 }
 
 dependencies {
-    // Offline speech recognition (Apache 2.0) — model is downloaded at runtime, not bundled.
+    // Offline speech recognition (Apache 2.0). The CI "completo" build bundles the pt model zip
+    // in assets (downloaded during the build, not committed); otherwise it is downloaded at runtime.
     implementation("com.alphacephei:vosk-android:0.3.47")
     implementation("net.java.dev.jna:jna:5.13.0@aar")
 

@@ -62,6 +62,8 @@ class VoiceInput(private val context: Context, private val listener: Listener) {
         when {
             online -> startOnline()
             VoskModelManager.isInstalled(context) -> startOffline()
+            VoskModelManager.ensureInstalledFromAssets(context) ->
+                listener.onVoiceError("Preparando a voz offline (só na primeira vez)… tente de novo em alguns segundos.", openSettings = false)
             prefs.offlineOnly || !Net.isOnline(context) ->
                 listener.onVoiceError("Sem internet: baixe o modelo de voz offline no app Teclado IA", openSettings = true)
             else -> listener.onVoiceError("Reconhecimento de voz do sistema indisponível. Baixe o modelo offline.", openSettings = true)
