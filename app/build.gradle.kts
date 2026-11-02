@@ -11,8 +11,8 @@ android {
         applicationId = "com.magames.tecladoia"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.2.1"
 
         ndk {
             // Real phones only (keeps the APK smaller); Vosk ships native libs per ABI.

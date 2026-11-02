@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  VERSION: 0.2.0
+  VERSION: 0.2.1
   VOSK_MODEL: vosk-model-small-pt-0.3
 
 jobs:
@@ -48,7 +48,7 @@ jobs:
       - name: Build APK (completo)
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          ./gradlew testDebugUnitTest assembleDebug --stacktrace --no-daemon
 
       - name: Check model is inside the APK
         run: |
@@ -73,6 +73,8 @@ jobs:
           make_latest: true
           body: |
             Teclado IA v${{ env.VERSION }} — versão completa, gratuita.
+            Correção: ao tocar em "?123" (símbolos) o teclado inteiro ficava preto e não dava para usar os símbolos. Agora as páginas de símbolos (?123 e =\<) e a volta para ABC funcionam; se alguma página falhar, o teclado volta para as letras em vez de ficar preto.
+            Atualização: instala por cima da v0.2.0 (mesma chave), sem desinstalar.
             - O modelo de voz offline em português (Vosk vosk-model-small-pt-0.3) já vem dentro do APK: instale uma vez e a voz funciona sem internet, sem baixar nada.
             - Na primeira abertura o modelo é instalado automaticamente (o progresso aparece nas configurações).
             - Ditado por voz em tempo real (online: reconhecimento do Android; offline: Vosk) e correção em português (SymSpell + LanguageTool).

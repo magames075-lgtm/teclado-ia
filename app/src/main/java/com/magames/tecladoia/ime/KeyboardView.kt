@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.util.TypedValue
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
@@ -27,15 +28,16 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
     }
 
     companion object {
-        const val CODE_SHIFT = -1
-        const val CODE_SYMBOLS = -2
-        const val CODE_LETTERS = -3
-        const val CODE_ENTER = -4
-        const val CODE_DELETE = -5
-        const val CODE_MIC = -6
-        const val CODE_SYMBOLS2 = -7
-        const val CODE_TEXT = 0
-        const val CODE_SPACE = 32
+        const val CODE_SHIFT = KeyLayout.CODE_SHIFT
+        const val CODE_SYMBOLS = KeyLayout.CODE_SYMBOLS
+        const val CODE_LETTERS = KeyLayout.CODE_LETTERS
+        const val CODE_ENTER = KeyLayout.CODE_ENTER
+        const val CODE_DELETE = KeyLayout.CODE_DELETE
+        const val CODE_MIC = KeyLayout.CODE_MIC
+        const val CODE_SYMBOLS2 = KeyLayout.CODE_SYMBOLS2
+        const val CODE_TEXT = KeyLayout.CODE_TEXT
+        const val CODE_SPACE = KeyLayout.CODE_SPACE
+        private const val TAG = "TecladoIA"
 
         private val ACCENTS = mapOf(
             "a" to listOf("á", "ã", "â", "à", "ä", "ª"),
@@ -57,16 +59,6 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
 
     enum class Shift { OFF, ON, LOCK }
     enum class Mode { LETTERS, SYMBOLS, SYMBOLS2 }
-
-    class Key(
-        val label: String,
-        val code: Int,
-        val text: String? = null,
-        val weight: Float = 1f,
-        val special: Boolean = false,
-    ) {
-        val rect = RectF()
-    }
 
     private val dp = context.resources.displayMetrics.density
     private fun px(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics)
@@ -95,77 +87,81 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
 
     var shift = Shift.OFF
         set(v) { field = v; invalidate() }
+
+    /**
+     * Changing the page MUST rebuild and re-lay-out the keys right away. Before v0.2.1 only
+     * rebuild happened (layout ran in onSizeChanged, which does not fire because every page has
+     * the same height), so "?123" showed a black keyboard with untouchable 0x0 keys.
+     */
     var mode = Mode.LETTERS
-        set(v) { field = v; rows = buildRows(); requestLayout(); invalidate() }
+        set(v) {
+            val old = field
+            field = v
+            if (!applyRows()) {
+                Log.e(TAG, "layout for $v failed, falling back to letters")
+                field = if (v == Mode.LETTERS) old else Mode.LETTERS
+                applyRows()
+            }
+        }
     var micActive = false
         set(v) { field = v; invalidate() }
     var enterLabel = "⏎"
-        set(v) { field = v; rows = buildRows(); layoutKeys(); invalidate() }
+        set(v) { field = v.ifEmpty { "⏎" }; applyRows() }
     var hapticsEnabled = true
 
-    private var rows: List<List<Key>> = buildRows()
+    private var rows: List<List<Key>> = KeyLayout.build(KbMode.LETTERS, "⏎")
 
-    private fun letterRow(s: String) = s.split(" ").map { Key(it, CODE_TEXT, it) }
+    private fun kbMode(m: Mode) = when (m) {
+        Mode.LETTERS -> KbMode.LETTERS
+        Mode.SYMBOLS -> KbMode.SYMBOLS
+        Mode.SYMBOLS2 -> KbMode.SYMBOLS2
+    }
 
-    private fun bottomRow(switchLabel: String, switchCode: Int) = listOf(
-        Key(switchLabel, switchCode, weight = 1.5f, special = true),
-        Key(",", CODE_TEXT, ","),
-        Key("🎤", CODE_MIC, special = true),
-        Key("Português", CODE_SPACE, " ", weight = 4f),
-        Key(".", CODE_TEXT, "."),
-        Key(enterLabel, CODE_ENTER, weight = 1.5f, special = true),
-    )
-
-    private fun buildRows(): List<List<Key>> = when (mode) {
-        Mode.LETTERS -> listOf(
-            letterRow("q w e r t y u i o p"),
-            letterRow("a s d f g h j k l ç"),
-            listOf(Key("⇧", CODE_SHIFT, weight = 1.5f, special = true)) +
-                letterRow("z x c v b n m") +
-                listOf(Key("⌫", CODE_DELETE, weight = 1.5f, special = true)),
-            bottomRow("?123", CODE_SYMBOLS),
-        )
-        Mode.SYMBOLS -> listOf(
-            letterRow("1 2 3 4 5 6 7 8 9 0"),
-            letterRow("@ # R$ _ & - + ( ) /"),
-            listOf(Key("=\\<", CODE_SYMBOLS2, weight = 1.5f, special = true)) +
-                letterRow("* \" ' : ; ! ?") +
-                listOf(Key("⌫", CODE_DELETE, weight = 1.5f, special = true)),
-            bottomRow("ABC", CODE_LETTERS),
-        )
-        Mode.SYMBOLS2 -> listOf(
-            letterRow("~ ` | • √ π ÷ × ¶ ∆"),
-            letterRow("€ £ ¥ ^ ° = { } [ ]"),
-            listOf(Key("?123", CODE_SYMBOLS, weight = 1.5f, special = true)) +
-                letterRow("\\ % © ® ™ < >") +
-                listOf(Key("⌫", CODE_DELETE, weight = 1.5f, special = true)),
-            bottomRow("ABC", CODE_LETTERS),
-        )
+    /**
+     * Builds the rows for the current mode and lays them out immediately. Returns false when the
+     * page could not be built/laid out (the previous rows, or letters, stay on screen).
+     */
+    private fun applyRows(): Boolean {
+        val ok = try {
+            val newRows = KeyLayout.build(kbMode(mode), enterLabel)
+            val laidOut = KeyLayout.layout(newRows, width.toFloat(), keyHeight, gap, pad)
+            if (laidOut && !KeyLayout.isValid(newRows)) {
+                false
+            } else {
+                // not laid out yet (width 0): onSizeChanged / onDraw will lay it out
+                popupOptions = emptyList()
+                pressedKey = null
+                repeatKey = null
+                rows = newRows
+                true
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "building keyboard page failed", t)
+            false
+        }
+        requestLayout()
+        invalidate()
+        return ok
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        val h = (pad * 2 + rows.size * keyHeight).toInt()
+        val h = KeyLayout.heightFor(rows, keyHeight, pad).toInt()
         setMeasuredDimension(w, h)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) { layoutKeys() }
 
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        if (rows.any { r -> r.any { !it.isLaidOut } }) layoutKeys()
+    }
+
     private fun layoutKeys() {
-        val w = width.toFloat()
-        if (w <= 0) return
-        var y = pad
-        for (row in rows) {
-            val total = 10f
-            val unit = (w - pad * 2) / total
-            val rowWidth = row.sumOf { it.weight.toDouble() }.toFloat() * unit
-            var x = pad + ((w - pad * 2) - rowWidth) / 2f
-            for (k in row) {
-                val kw = k.weight * unit
-                k.rect.set(x + gap, y + gap, x + kw - gap, y + keyHeight - gap)
-                x += kw
-            }
-            y += keyHeight
+        try {
+            KeyLayout.layout(rows, width.toFloat(), keyHeight, gap, pad)
+        } catch (t: Throwable) {
+            Log.e(TAG, "layoutKeys failed", t)
         }
     }
 
@@ -176,8 +172,24 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         return if (shift != Shift.OFF) k.label.uppercase(Locale("pt", "BR")) else k.label
     }
 
+    private val keyRect = RectF()
+
     override fun onDraw(canvas: Canvas) {
         canvas.drawColor(bgColor)
+        // Safety net: never draw a page whose keys have no bounds (that is what looked "black").
+        if (width > 0 && rows.any { r -> r.any { !it.isLaidOut } }) layoutKeys()
+        try {
+            drawKeys(canvas)
+            drawPopup(canvas)
+        } catch (t: Throwable) {
+            Log.e(TAG, "draw failed on $mode", t)
+            textPaint.color = Color.WHITE
+            smallText.color = Color.WHITE
+            if (mode != Mode.LETTERS) post { mode = Mode.LETTERS }
+        }
+    }
+
+    private fun drawKeys(canvas: Canvas) {
         val radius = px(6f)
         for (row in rows) for (k in row) {
             keyPaint.color = when {
@@ -188,21 +200,19 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                 k.special -> specialColor
                 else -> keyColor
             }
-            canvas.drawRoundRect(k.rect, radius, radius, keyPaint)
+            keyRect.set(k.left, k.top, k.right, k.bottom)
+            canvas.drawRoundRect(keyRect, radius, radius, keyPaint)
             val label = displayLabel(k)
             val p = if (label.length > 2 || k.code == CODE_SPACE) smallText else textPaint
-            if (k.code == CODE_SHIFT && shift == Shift.ON) {
-                p.color = Color.parseColor("#B794F6")
-            }
-            val ty = k.rect.centerY() - (p.descent() + p.ascent()) / 2
-            canvas.drawText(if (k.code == CODE_SPACE) "Português (BR)" else label, k.rect.centerX(), ty, p)
+            p.color = if (k.code == CODE_SHIFT && shift == Shift.ON) Color.parseColor("#B794F6") else Color.WHITE
+            val ty = k.centerY - (p.descent() + p.ascent()) / 2
+            canvas.drawText(if (k.code == CODE_SPACE) "Português (BR)" else label, k.centerX, ty, p)
             p.color = Color.WHITE
             if (mode == Mode.LETTERS && k.code == CODE_TEXT) {
                 val hint = ACCENTS[k.label]?.lastOrNull { it.length == 1 && it[0].isDigit() }
-                if (hint != null) canvas.drawText(hint, k.rect.right - px(4f), k.rect.top + px(12f), hintPaint)
+                if (hint != null) canvas.drawText(hint, k.right - px(4f), k.top + px(12f), hintPaint)
             }
         }
-        drawPopup(canvas)
     }
 
     // ---------------- long-press popup ----------------
@@ -218,11 +228,12 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         val upper = shift != Shift.OFF && mode == Mode.LETTERS
         popupOptions = base.map { if (upper) it.uppercase(Locale("pt", "BR")) else it }
         popupSelected = 0
-        popupCellW = k.rect.width().coerceAtLeast(px(34f))
+        if (popupOptions.isEmpty()) return
+        popupCellW = k.width.coerceAtLeast(px(34f))
         val total = popupCellW * popupOptions.size
-        var left = k.rect.left
+        var left = k.left
         if (left + total > width - pad) left = (width - pad - total).coerceAtLeast(pad)
-        val top = (k.rect.top - keyHeight).coerceAtLeast(0f)
+        val top = (k.top - keyHeight).coerceAtLeast(0f)
         popupRect.set(left, top, left + total, top + keyHeight - gap)
         invalidate()
     }
@@ -277,12 +288,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         }
     }
 
-    private fun keyAt(x: Float, y: Float): Key? {
-        for (row in rows) for (k in row) {
-            if (x >= k.rect.left - gap && x <= k.rect.right + gap && y >= k.rect.top - gap && y <= k.rect.bottom + gap) return k
-        }
-        return null
-    }
+    private fun keyAt(x: Float, y: Float): Key? = KeyLayout.keyAt(rows, x, y, gap)
 
     private fun haptic() {
         if (hapticsEnabled) performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -314,7 +320,8 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                     val idx = e.findPointerIndex(pressedPointer)
                     if (idx >= 0) {
                         val x = e.getX(idx)
-                        val sel = ((x - popupRect.left) / popupCellW).toInt().coerceIn(0, popupOptions.size - 1)
+                        val sel = if (popupCellW <= 0f) 0
+                            else ((x - popupRect.left) / popupCellW).toInt().coerceIn(0, popupOptions.size - 1)
                         if (sel != popupSelected) { popupSelected = sel; invalidate() }
                     }
                 }
@@ -325,7 +332,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                     handler.removeCallbacks(longPress)
                     handler.removeCallbacks(repeat)
                     if (popupOptions.isNotEmpty()) {
-                        val opt = popupOptions[popupSelected]
+                        val opt = popupOptions.getOrNull(popupSelected) ?: popupOptions[0]
                         popupOptions = emptyList()
                         listener.onKey(CODE_TEXT, opt)
                     } else if (!longPressFired && repeatKey == null) {
